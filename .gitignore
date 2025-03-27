@@ -1,0 +1,15 @@
+# Ignore ROS2 build and install folders
+/build/
+/install/
+/log/
+
+# Ignore any editor or system-specific files
+*.swp
+*.bak
+*.tmp
+*.log
+*.DS_Store
+Thumbs.db
+
+# Optionally, ignore testing-related directories or files (if applicable)
+test/
