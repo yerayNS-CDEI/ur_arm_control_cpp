@@ -8,7 +8,7 @@ def generate_launch_description():
     urdf_path = os.path.join(
         get_package_share_directory('ur_arm_control'),
         'urdf',
-        'ur5e_2f85.urdf'
+        'ur10e.urdf'
     )
     return LaunchDescription([
         Node(
