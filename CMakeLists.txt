@@ -107,18 +107,17 @@ install(PROGRAMS
   scripts/simple_node.py
   scripts/example_move.py
   scripts/publisher_joint_trajectory_controller.py
+  scripts/publisher_joint_trajectory_planned.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
 # LAUNCH FILES -----------------------------------------------
-install(DIRECTORY
-  launch
+install(DIRECTORY launch
   DESTINATION share/${PROJECT_NAME}
 )
 
 # YAML FILES --------------------------------------------------
-install(DIRECTORY
-  config
+install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME}
 )
 
