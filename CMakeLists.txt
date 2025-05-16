@@ -108,6 +108,7 @@ install(PROGRAMS
   scripts/example_move.py
   scripts/publisher_joint_trajectory_controller.py
   scripts/publisher_joint_trajectory_planned.py
+  scripts/end_effector_pose_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

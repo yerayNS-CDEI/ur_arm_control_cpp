@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # Copyright 2022 Stogl Robotics Consulting UG (haftungsbeschränkt)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -60,7 +61,7 @@ class PublisherJointTrajectory(Node):
             for name in self.joints:
                 if len(self.starting_point[name]) != 2:
                     raise Exception('"starting_point" parameter is not set correctly!')
-            self.joint_state_sub = self.create_subscription(JointState, "joint_states", self.joint_state_callback, 10)
+            self.joint_state_sub = self.create_subscription(JointState, "/joint_states", self.joint_state_callback, 10)
             self.create_subscription(JointTrajectory, "/planned_trajectory", self.joint_path_callback, 10)
             self.create_subscription(Bool, "/emergency_stop", self.emergency_stop_callback, 10)
 
@@ -72,6 +73,15 @@ class PublisherJointTrajectory(Node):
         self.planned_trajectory = None
         self.stop_trajectory = False 
         self.execution_complete = True
+        self.current_joint_state = None
+        self.joint_names = [
+            'shoulder_pan_joint',
+            'shoulder_lift_joint',
+            'elbow_joint',
+            'wrist_1_joint',
+            'wrist_2_joint',
+            'wrist_3_joint'
+        ]
 
         publish_topic = "/" + controller_name + "/" + "joint_trajectory"
 
@@ -99,6 +109,8 @@ class PublisherJointTrajectory(Node):
         self.execution_complete = True
 
     def timer_callback(self):
+        self.monitor_execution()
+
         if self.stop_trajectory:
             self.get_logger().warn("Trajectory stop triggered, halting movement.")
             return
@@ -109,7 +121,7 @@ class PublisherJointTrajectory(Node):
         
         execution_msg = Bool()
         execution_msg.data = self.execution_complete
-        self.execution_status_pub.publish(execution_msg)
+        self.execution_status_pub.publish(execution_msg)       
 
         if self.trajectory_received and self.planned_trajectory:
             self.get_logger().info("Publishing received trajectory to controller...")
@@ -152,7 +164,6 @@ class PublisherJointTrajectory(Node):
         self.planned_trajectory = msg
         self.trajectory_received = True
         # self.execution_complete = False
-        self.monitor_execution()
         self.get_logger().info("Planned trajectory received and stored.")
         return
     
@@ -161,13 +172,23 @@ class PublisherJointTrajectory(Node):
         # Simula una verificación de que el robot ha alcanzado su meta.
         # Este es un lugar donde puedes agregar un mecanismo real como un ActionServer
         # o simplemente verificar la posición en el JointState, por ejemplo:
+
+        self.get_logger().info("Monitoring execution.")
         
         if self.current_joint_state:  # Solo lo haces si el JointState está disponible
+            self.get_logger().info("Current joint state received.")
+            self.get_logger().info(f"Current joint state: {self.current_joint_state}")
             goal_reached = True
-            for idx, goal_position in enumerate(self.planned_trajectory.points[-1].positions):
-                if abs(self.current_joint_state.position[idx] - goal_position) > 0.01:  # Tolerancia
-                    goal_reached = False
-                    break
+            if self.planned_trajectory is not None:
+                # self.get_logger().info(f"Planned trajectory: {self.planned_trajectory}")
+                # self.get_logger().info(f"Current joint state position 5: {self.current_joint_state.position[3:5]}")
+                current_joint_values = [self.current_joint_state.position[-1], self.current_joint_state.position[0], self.current_joint_state.position[1], self.current_joint_state.position[2], self.current_joint_state.position[3], self.current_joint_state.position[4]]
+                self.get_logger().info(f"Current joint values: {current_joint_values}")
+                for idx, goal_position in enumerate(self.planned_trajectory.points[-1].positions):
+                    # self.get_logger().info(f"Goal positons: {goal_position}")
+                    if abs(current_joint_values[idx] - goal_position) > 0.01:  # Tolerancia
+                        goal_reached = False
+                        break
             
             if goal_reached:
                 self.execution_complete = True

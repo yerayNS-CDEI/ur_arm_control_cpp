@@ -452,10 +452,9 @@ def generate_launch_description():
             "kinematics_params_file",
             default_value=PathJoinSubstitution(
                 [
-                    FindPackageShare(LaunchConfiguration("description_package")),
+                    FindPackageShare("ur_arm_control"),
                     "config",
-                    LaunchConfiguration("ur_type"),
-                    "default_kinematics.yaml",
+                    "my_robot_calibration.yaml",
                 ]
             ),
             description="The calibration configuration of the actual robot used.",
