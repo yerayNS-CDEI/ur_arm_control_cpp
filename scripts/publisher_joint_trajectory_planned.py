@@ -177,13 +177,13 @@ class PublisherJointTrajectory(Node):
         
         if self.current_joint_state:  # Solo lo haces si el JointState está disponible
             self.get_logger().info("Current joint state received.")
-            self.get_logger().info(f"Current joint state: {self.current_joint_state}")
+            # self.get_logger().info(f"Current joint state: {self.current_joint_state}")
             goal_reached = True
             if self.planned_trajectory is not None:
                 # self.get_logger().info(f"Planned trajectory: {self.planned_trajectory}")
                 # self.get_logger().info(f"Current joint state position 5: {self.current_joint_state.position[3:5]}")
                 current_joint_values = [self.current_joint_state.position[-1], self.current_joint_state.position[0], self.current_joint_state.position[1], self.current_joint_state.position[2], self.current_joint_state.position[3], self.current_joint_state.position[4]]
-                self.get_logger().info(f"Current joint values: {current_joint_values}")
+                # self.get_logger().info(f"Current joint values: {current_joint_values}")
                 for idx, goal_position in enumerate(self.planned_trajectory.points[-1].positions):
                     # self.get_logger().info(f"Goal positons: {goal_position}")
                     if abs(current_joint_values[idx] - goal_position) > 0.01:  # Tolerancia

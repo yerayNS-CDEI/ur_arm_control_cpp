@@ -109,6 +109,7 @@ install(PROGRAMS
   scripts/publisher_joint_trajectory_controller.py
   scripts/publisher_joint_trajectory_planned.py
   scripts/end_effector_pose_node.py
+  scripts/send_and_monitor_trajectory.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
