@@ -1,233 +1,424 @@
 #!/usr/bin/env python3
 
-# Copyright 2022 Stogl Robotics Consulting UG (haftungsbeschränkt)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
-# Authors: Denis Štogl, Lovro Ivanov
-#
+########################################################
+
+#### Node using an action client to send goals
+
+########################################################
 
 import rclpy
 from rclpy.node import Node
-from builtin_interfaces.msg import Duration
-from rcl_interfaces.msg import ParameterDescriptor
-
+from rclpy.action import ActionClient
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from sensor_msgs.msg import JointState
+from action_msgs.msg import GoalStatus
 from std_msgs.msg import Bool
+from builtin_interfaces.msg import Duration
+from control_msgs.action import FollowJointTrajectory
+from control_msgs.msg import JointTolerance
+from copy import deepcopy
 
-
-
-class PublisherJointTrajectory(Node):
-    ## Subscripcion a un topic que de la posicion actual del robot
-
+class PublisherJointTrajectoryActionClient(Node):
 
     def __init__(self):
-        super().__init__("publisher_joint_trajectory_planned")
-        # Declare all parameters
-        self.declare_parameter("controller_name", "position_trajectory_controller")
-        self.declare_parameter("wait_sec_between_publish", 1)
-        self.declare_parameter("joints", [""])
+        super().__init__("publisher_joint_trajectory_action_client")
+
+        self.declare_parameter("controller_name", "scaled_joint_trajectory_controller")
+        self.declare_parameter("joints", ["shoulder_pan_joint", "shoulder_lift_joint",
+                                          "elbow_joint", "wrist_1_joint",
+                                          "wrist_2_joint", "wrist_3_joint"])
         self.declare_parameter("check_starting_point", True)
 
-        # Read parameters
         controller_name = self.get_parameter("controller_name").value
-        wait_sec_between_publish = self.get_parameter("wait_sec_between_publish").value
         self.joints = self.get_parameter("joints").value
         self.check_starting_point = self.get_parameter("check_starting_point").value
-        self.starting_point = {}
 
         if self.joints is None or len(self.joints) == 0:
-            raise Exception('"joints" parameter is not set!')
-
-        # starting point stuff
+            raise Exception('"joints" parameter is required')
+        
+        self.starting_point = {}
         if self.check_starting_point:
-            # declare nested params
             for name in self.joints:
-                param_name_tmp = "starting_point_limits" + "." + name
-                self.declare_parameter(param_name_tmp, [-2 * 3.14159, 2 * 3.14159])
-                self.starting_point[name] = self.get_parameter(param_name_tmp).value
+                param = "starting_point_limits." + name
+                self.declare_parameter(param, [-2 * 3.14159, 2 * 3.14159])
+                self.starting_point[name] = self.get_parameter(param).value
 
             for name in self.joints:
                 if len(self.starting_point[name]) != 2:
                     raise Exception('"starting_point" parameter is not set correctly!')
-            self.joint_state_sub = self.create_subscription(JointState, "/joint_states", self.joint_state_callback, 10)
-            self.create_subscription(JointTrajectory, "/planned_trajectory", self.joint_path_callback, 10)
-            self.create_subscription(Bool, "/emergency_stop", self.emergency_stop_callback, 10)
+                
+        self.joint_state_sub = self.create_subscription(JointState, "/joint_states", self.joint_state_callback, 10)
+        self.trajectory_sub = self.create_subscription(JointTrajectory, "/planned_trajectory", self.trajectory_callback, 10)
+        self.status_pub = self.create_publisher(Bool, "/execution_status", 10)
 
-        # initialize starting point status
-        self.starting_point_ok = not self.check_starting_point
+        action_topic = f"{controller_name}/follow_joint_trajectory"
+        self._action_client = ActionClient(self, FollowJointTrajectory, action_topic)
 
-        self.joint_state_msg_received = False
-        self.trajectory_received = False
-        self.planned_trajectory = None
-        self.stop_trajectory = False 
-        self.execution_complete = True
         self.current_joint_state = None
-        self.joint_names = [
-            'shoulder_pan_joint',
-            'shoulder_lift_joint',
-            'elbow_joint',
-            'wrist_1_joint',
-            'wrist_2_joint',
-            'wrist_3_joint'
-        ]
-
-        publish_topic = "/" + controller_name + "/" + "joint_trajectory"
-
-        self.publisher_ = self.create_publisher(JointTrajectory, publish_topic, 1)
-        self.execution_status_pub = self.create_publisher(Bool, "/execution_status", 10)
-        self.timer = self.create_timer(wait_sec_between_publish, self.timer_callback)
-
-    def emergency_stop_callback(self, msg):
-        """Función que activa la parada de emergencia"""
-        self.emergency_stop = msg
-        self.stop_trajectory = True
-        self.execution_complete = False
-        self.get_logger().warn("Emergency stop triggered! Stopping the robot.")
-        # Aquí puedes mandar comandos para detener la trayectoria
-        self.stop_joint_trajectory()        
-
-    def stop_joint_trajectory(self):
-        """Comando para detener el robot"""
-        # Publica un mensaje vacío o comando de parada al controlador de la trayectoria
-        stop_msg = JointTrajectory()
-        stop_msg.joint_names = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
-        stop_msg.points = []  # Vacío o "detener movimiento"
-        self.publisher_.publish(stop_msg)
-        self.get_logger().info("Sent stop command to the robot.")
+        self.starting_point_ok = not self.check_starting_point
+        self.planned_trajectory = None
+        self.trajectory_received = False
         self.execution_complete = True
 
-    def timer_callback(self):
-        self.monitor_execution()
-
-        if self.stop_trajectory:
-            self.get_logger().warn("Trajectory stop triggered, halting movement.")
-            return
-        
-        if not self.starting_point_ok:
-            self.get_logger().warn("Start configuration is not within configured limits!")
-            return
-        
-        execution_msg = Bool()
-        execution_msg.data = self.execution_complete
-        self.execution_status_pub.publish(execution_msg)       
-
-        if self.trajectory_received and self.planned_trajectory:
-            self.get_logger().info("Publishing received trajectory to controller...")
-            self.publisher_.publish(self.planned_trajectory)
-            self.trajectory_received = False  # evitar repetir envío
-            self.execution_complete = False  # Marca la flag como falsa cuando una nueva trayectoria empieza
-        else:
-            self.get_logger().info("No planned trajectory received yet.")
+        self.get_logger().info("Waiting for action server...")
+        self._action_client.wait_for_server()
+        self.timer = self.create_timer(1.0, self.timer_callback)
 
     def joint_state_callback(self, msg):
         self.current_joint_state = msg
 
-        if not self.joint_state_msg_received:   # Si se elimina esta linea, se evalua en cada punto
+        if self.check_starting_point:
+            limit_exceeded = False
+            for idx, name in enumerate(msg.name):
+                if name in self.starting_point:
+                    pos = msg.position[idx]
+                    low, high = self.starting_point[name]
+                    if not (low <= pos <= high):
+                        self.get_logger().warn(f"Joint {name} position {pos:.3f} out of limits {low:.3f}, {high:.3f}")
+                        limit_exceeded = True
+            self.starting_point_ok = not limit_exceeded
+            self.check_starting_point = False       # to just check once at the start
 
-            # check start state
-            limit_exceeded = [False] * len(msg.name)
-            for idx, enum in enumerate(msg.name):
-                if (msg.position[idx] < self.starting_point[enum][0]) or (
-                    msg.position[idx] > self.starting_point[enum][1]
-                ):
-                    # self.get_logger().warn(f"Starting point limits exceeded for joint {enum} !")
-                    self.get_logger().warn(f"Starting point limits exceeded for joint {enum} !")
-                    self.get_logger().warn(f"Value stp0: {self.starting_point[enum][0]}, Value stp0: {self.starting_point[enum][1]}, Value pos: {msg.position[idx]}")
-                    limit_exceeded[idx] = True
-
-            if any(limit_exceeded):
-                self.starting_point_ok = False
-            else:
-                self.starting_point_ok = True
-
-            self.joint_state_msg_received = True
-        else:
-            return
-        
-    def joint_path_callback(self, msg):
+    def trajectory_callback(self, msg):
         if not self.starting_point_ok:
-            self.get_logger().warn("Received trajectory, but starting point is not valid!")
+            self.get_logger().warn("Received trajectory but robot not in valid starting configuration.")
             return
-
         self.planned_trajectory = msg
         self.trajectory_received = True
-        # self.execution_complete = False
-        self.get_logger().info("Planned trajectory received and stored.")
-        return
-    
-    def monitor_execution(self):
-        """Verifica si el robot ha alcanzado la posición final"""
-        # Simula una verificación de que el robot ha alcanzado su meta.
-        # Este es un lugar donde puedes agregar un mecanismo real como un ActionServer
-        # o simplemente verificar la posición en el JointState, por ejemplo:
+        self.get_logger().info("Trajectory received and stored.")
 
-        self.get_logger().info("Monitoring execution.")
-        
-        if self.current_joint_state:  # Solo lo haces si el JointState está disponible
-            self.get_logger().info("Current joint state received.")
-            # self.get_logger().info(f"Current joint state: {self.current_joint_state}")
-            goal_reached = True
-            if self.planned_trajectory is not None:
-                # self.get_logger().info(f"Planned trajectory: {self.planned_trajectory}")
-                # self.get_logger().info(f"Current joint state position 5: {self.current_joint_state.position[3:5]}")
-                current_joint_values = [self.current_joint_state.position[-1], self.current_joint_state.position[0], self.current_joint_state.position[1], self.current_joint_state.position[2], self.current_joint_state.position[3], self.current_joint_state.position[4]]
-                # self.get_logger().info(f"Current joint values: {current_joint_values}")
-                for idx, goal_position in enumerate(self.planned_trajectory.points[-1].positions):
-                    # self.get_logger().info(f"Goal positons: {goal_position}")
-                    if abs(current_joint_values[idx] - goal_position) > 0.01:  # Tolerancia
-                        goal_reached = False
-                        break
-            
-            if goal_reached:
-                self.execution_complete = True
-                self.get_logger().info("Goal reached! Execution complete.")
-            else:
-                self.get_logger().info("Robot has not yet reached goal. Continuing monitoring.")
+    def timer_callback(self):
+        status_msg = Bool()
+        status_msg.data = self.execution_complete
+        self.status_pub.publish(status_msg)
+
+        if self.trajectory_received and self.starting_point_ok:
+            self.send_trajectory_goal()
+            self.trajectory_received = False
+            self.execution_complete = False
+
+    def send_trajectory_goal(self):
+        goal_msg = FollowJointTrajectory.Goal()
+
+        trajectory = deepcopy(self.planned_trajectory)
+        duration_between_points = 2.0
+
+        for i, point in enumerate(trajectory.points):
+            point.time_from_start = Duration(sec=int(duration_between_points * (i + 1)))
+            if not point.velocities or len(point.velocities) != len(point.positions):
+                point.velocities = [0.0] * len(point.positions)
+                
+        goal_msg.trajectory = trajectory
+        goal_msg.goal_time_tolerance = Duration(sec=1)
+        goal_msg.goal_tolerance = [
+            JointTolerance(position=0.01, velocity=0.01, name=self.joints[i]) for i in range(6)
+        ]
+
+        self.get_logger().info("Sending trajectory goal with added times and velocities...")
+        self._action_client.send_goal_async(goal_msg).add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().error("Goal rejected.")
+            # raise RuntimeError("Goal rejected :(")
+            self.execution_complete = True
+            return
+
+        self.get_logger().info("Goal accepted. Waiting for result...")
+        goal_handle.get_result_async().add_done_callback(self.get_result_callback)
+
+    def get_result_callback(self, future):
+        result = future.result().result
+        status = future.result().status
+        self.get_logger().info(f"Done with result: {self.status_to_str(status)}")
+        if status == GoalStatus.STATUS_SUCCEEDED:
+            self.get_logger().info("Trajectory execution succeeded.")
+        else:
+            if result.error_code != FollowJointTrajectory.Result.SUCCESSFUL:
+                self.get_logger().error(
+                    f"Done with result: {self.error_code_to_str(result.error_code)}"
+                )
+            raise RuntimeError("Executing trajectory failed. " + result.error_string)
+        self.execution_complete = True
+
+    @staticmethod
+    def error_code_to_str(error_code):
+        if error_code == FollowJointTrajectory.Result.SUCCESSFUL:
+            return "SUCCESSFUL"
+        if error_code == FollowJointTrajectory.Result.INVALID_GOAL:
+            return "INVALID_GOAL"
+        if error_code == FollowJointTrajectory.Result.INVALID_JOINTS:
+            return "INVALID_JOINTS"
+        if error_code == FollowJointTrajectory.Result.OLD_HEADER_TIMESTAMP:
+            return "OLD_HEADER_TIMESTAMP"
+        if error_code == FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED:
+            return "PATH_TOLERANCE_VIOLATED"
+        if error_code == FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED:
+            return "GOAL_TOLERANCE_VIOLATED"
+
+    @staticmethod
+    def status_to_str(error_code):
+        if error_code == GoalStatus.STATUS_UNKNOWN:
+            return "UNKNOWN"
+        if error_code == GoalStatus.STATUS_ACCEPTED:
+            return "ACCEPTED"
+        if error_code == GoalStatus.STATUS_EXECUTING:
+            return "EXECUTING"
+        if error_code == GoalStatus.STATUS_CANCELING:
+            return "CANCELING"
+        if error_code == GoalStatus.STATUS_SUCCEEDED:
+            return "SUCCEEDED"
+        if error_code == GoalStatus.STATUS_CANCELED:
+            return "CANCELED"
+        if error_code == GoalStatus.STATUS_ABORTED:
+            return "ABORTED"
 
 def main(args=None):
     rclpy.init(args=args)
-
-    publisher_joint_trajectory = PublisherJointTrajectory()
-
+    node = PublisherJointTrajectoryActionClient()
     try:
-        rclpy.spin(publisher_joint_trajectory)
-    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
-        print("Keyboard interrupt received. Shutting down node.")
-    except Exception as e:
-        print(f"Unhandled exception: {e}")
-
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    except RuntimeError as err:
+        node.get_logger().error(str(err))
+    except SystemExit:
+        rclpy.logging.get_logger("jtc_client").info("Done")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == "__main__":
     main()
 
 
 
+# ########################################################
+
+# #### Node using a topic publisher to send goals 
+
+# ########################################################
+
+# # Copyright 2022 Stogl Robotics Consulting UG (haftungsbeschränkt)
+# #
+# # Licensed under the Apache License, Version 2.0 (the "License");
+# # you may not use this file except in compliance with the License.
+# # You may obtain a copy of the License at
+# #
+# #     http://www.apache.org/licenses/LICENSE-2.0
+# #
+# # Unless required by applicable law or agreed to in writing, software
+# # distributed under the License is distributed on an "AS IS" BASIS,
+# # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# # See the License for the specific language governing permissions and
+# # limitations under the License.
+# #
+# # Authors: Denis Štogl, Lovro Ivanov
+# #
+
+# import rclpy
+# from rclpy.node import Node
+# from builtin_interfaces.msg import Duration
+# from rcl_interfaces.msg import ParameterDescriptor
+
+# from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+# from sensor_msgs.msg import JointState
+# from std_msgs.msg import Bool
 
 
 
+# class PublisherJointTrajectory(Node):
+#     ## Subscripcion a un topic que de la posicion actual del robot
+
+
+#     def __init__(self):
+#         super().__init__("publisher_joint_trajectory_planned")
+#         # Declare all parameters
+#         self.declare_parameter("controller_name", "position_trajectory_controller")
+#         self.declare_parameter("wait_sec_between_publish", 1)
+#         self.declare_parameter("joints", [""])
+#         self.declare_parameter("check_starting_point", True)
+
+#         # Read parameters
+#         controller_name = self.get_parameter("controller_name").value
+#         wait_sec_between_publish = self.get_parameter("wait_sec_between_publish").value
+#         self.joints = self.get_parameter("joints").value
+#         self.check_starting_point = self.get_parameter("check_starting_point").value
+#         self.starting_point = {}
+
+#         if self.joints is None or len(self.joints) == 0:
+#             raise Exception('"joints" parameter is not set!')
+
+#         # starting point stuff
+#         if self.check_starting_point:
+#             # declare nested params
+#             for name in self.joints:
+#                 param_name_tmp = "starting_point_limits" + "." + name
+#                 self.declare_parameter(param_name_tmp, [-2 * 3.14159, 2 * 3.14159])
+#                 self.starting_point[name] = self.get_parameter(param_name_tmp).value
+
+#             for name in self.joints:
+#                 if len(self.starting_point[name]) != 2:
+#                     raise Exception('"starting_point" parameter is not set correctly!')
+#             self.joint_state_sub = self.create_subscription(JointState, "/joint_states", self.joint_state_callback, 10)
+#             self.create_subscription(JointTrajectory, "/planned_trajectory", self.joint_path_callback, 10)
+#             self.create_subscription(Bool, "/emergency_stop", self.emergency_stop_callback, 10)
+
+#         # initialize starting point status
+#         self.starting_point_ok = not self.check_starting_point
+
+#         self.joint_state_msg_received = False
+#         self.trajectory_received = False
+#         self.planned_trajectory = None
+#         self.stop_trajectory = False 
+#         self.execution_complete = True
+#         self.current_joint_state = None
+#         self.joint_names = [
+#             'shoulder_pan_joint',
+#             'shoulder_lift_joint',
+#             'elbow_joint',
+#             'wrist_1_joint',
+#             'wrist_2_joint',
+#             'wrist_3_joint'
+#         ]
+
+#         publish_topic = "/" + controller_name + "/" + "joint_trajectory"
+
+#         self.publisher_ = self.create_publisher(JointTrajectory, publish_topic, 1)
+#         self.execution_status_pub = self.create_publisher(Bool, "/execution_status", 10)
+#         self.timer = self.create_timer(wait_sec_between_publish, self.timer_callback)
+
+#     def emergency_stop_callback(self, msg):
+#         """Función que activa la parada de emergencia"""
+#         self.emergency_stop = msg
+#         self.stop_trajectory = True
+#         self.execution_complete = False
+#         self.get_logger().warn("Emergency stop triggered! Stopping the robot.")
+#         # Aquí puedes mandar comandos para detener la trayectoria
+#         self.stop_joint_trajectory()        
+
+#     def stop_joint_trajectory(self):
+#         """Comando para detener el robot"""
+#         # Publica un mensaje vacío o comando de parada al controlador de la trayectoria
+#         stop_msg = JointTrajectory()
+#         stop_msg.joint_names = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
+#         stop_msg.points = []  # Vacío o "detener movimiento"
+#         self.publisher_.publish(stop_msg)
+#         self.get_logger().info("Sent stop command to the robot.")
+#         self.execution_complete = True
+
+#     def timer_callback(self):
+#         self.monitor_execution()
+
+#         if self.stop_trajectory:
+#             self.get_logger().warn("Trajectory stop triggered, halting movement.")
+#             return
+        
+#         if not self.starting_point_ok:
+#             self.get_logger().warn("Start configuration is not within configured limits!")
+#             return
+        
+#         execution_msg = Bool()
+#         execution_msg.data = self.execution_complete
+#         self.execution_status_pub.publish(execution_msg)       
+
+#         if self.trajectory_received and self.planned_trajectory:
+#             self.get_logger().info("Publishing received trajectory to controller...")
+#             self.publisher_.publish(self.planned_trajectory)
+#             self.trajectory_received = False  # evitar repetir envío
+#             self.execution_complete = False  # Marca la flag como falsa cuando una nueva trayectoria empieza
+#         else:
+#             self.get_logger().info("No planned trajectory received yet.")
+
+#     def joint_state_callback(self, msg):
+#         self.current_joint_state = msg
+
+#         if not self.joint_state_msg_received:   # Si se elimina esta linea, se evalua en cada punto
+
+#             # check start state
+#             limit_exceeded = [False] * len(msg.name)
+#             for idx, enum in enumerate(msg.name):
+#                 if (msg.position[idx] < self.starting_point[enum][0]) or (
+#                     msg.position[idx] > self.starting_point[enum][1]
+#                 ):
+#                     # self.get_logger().warn(f"Starting point limits exceeded for joint {enum} !")
+#                     self.get_logger().warn(f"Starting point limits exceeded for joint {enum} !")
+#                     self.get_logger().warn(f"Value stp0: {self.starting_point[enum][0]}, Value stp0: {self.starting_point[enum][1]}, Value pos: {msg.position[idx]}")
+#                     limit_exceeded[idx] = True
+
+#             if any(limit_exceeded):
+#                 self.starting_point_ok = False
+#             else:
+#                 self.starting_point_ok = True
+
+#             self.joint_state_msg_received = True
+#         else:
+#             return
+        
+#     def joint_path_callback(self, msg):
+#         if not self.starting_point_ok:
+#             self.get_logger().warn("Received trajectory, but starting point is not valid!")
+#             return
+
+#         self.planned_trajectory = msg
+#         self.trajectory_received = True
+#         # self.execution_complete = False
+#         self.get_logger().info("Planned trajectory received and stored.")
+#         return
+    
+#     def monitor_execution(self):
+#         """Verifica si el robot ha alcanzado la posición final"""
+#         # Simula una verificación de que el robot ha alcanzado su meta.
+#         # Este es un lugar donde puedes agregar un mecanismo real como un ActionServer
+#         # o simplemente verificar la posición en el JointState, por ejemplo:
+
+#         self.get_logger().info("Monitoring execution.")
+        
+#         if self.current_joint_state:  # Solo lo haces si el JointState está disponible
+#             self.get_logger().info("Current joint state received.")
+#             # self.get_logger().info(f"Current joint state: {self.current_joint_state}")
+#             goal_reached = True
+#             if self.planned_trajectory is not None:
+#                 # self.get_logger().info(f"Planned trajectory: {self.planned_trajectory}")
+#                 # self.get_logger().info(f"Current joint state position 5: {self.current_joint_state.position[3:5]}")
+#                 current_joint_values = [self.current_joint_state.position[-1], self.current_joint_state.position[0], self.current_joint_state.position[1], self.current_joint_state.position[2], self.current_joint_state.position[3], self.current_joint_state.position[4]]
+#                 # self.get_logger().info(f"Current joint values: {current_joint_values}")
+#                 for idx, goal_position in enumerate(self.planned_trajectory.points[-1].positions):
+#                     # self.get_logger().info(f"Goal positons: {goal_position}")
+#                     if abs(current_joint_values[idx] - goal_position) > 0.01:  # Tolerancia
+#                         goal_reached = False
+#                         break
+            
+#             if goal_reached:
+#                 self.execution_complete = True
+#                 self.get_logger().info("Goal reached! Execution complete.")
+#             else:
+#                 self.get_logger().info("Robot has not yet reached goal. Continuing monitoring.")
+
+# def main(args=None):
+#     rclpy.init(args=args)
+
+#     publisher_joint_trajectory = PublisherJointTrajectory()
+
+#     try:
+#         rclpy.spin(publisher_joint_trajectory)
+#     except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+#         print("Keyboard interrupt received. Shutting down node.")
+#     except Exception as e:
+#         print(f"Unhandled exception: {e}")
+
+
+# if __name__ == "__main__":
+#     main()
 
 
 
+########################################################
 
+#### Node using an action client to send goals (basic original structure)
 
-
-
-
-
-
-# #!/usr/bin/env python3
+########################################################
 
 # import rclpy
 # from rclpy.node import Node
