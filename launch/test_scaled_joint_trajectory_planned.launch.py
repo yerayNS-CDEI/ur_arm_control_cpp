@@ -32,10 +32,10 @@
 # Description: After a robot has been loaded, this will execute a series of trajectories.
 
 from launch import LaunchDescription
-from launch.substitutions import PathJoinSubstitution
+from launch.substitutions import PathJoinSubstitution, LaunchConfiguration
+from launch.actions import DeclareLaunchArgument    
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-
 
 def generate_launch_description():
 
@@ -45,11 +45,20 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            DeclareLaunchArgument(
+                "check_starting_point",
+                default_value="false",
+                description="Check if current joint state is within allowed starting limits"
+            ),
+
             Node(
                 package="ur_arm_control",
                 executable="publisher_joint_trajectory_planned.py",
                 name="publisher_joint_trajectory_planned",
-                parameters=[controller_config],
+                parameters=[
+                    controller_config,
+                    {"check_starting_point": LaunchConfiguration("check_starting_point")}
+                ],
                 output="screen",
             )
         ]

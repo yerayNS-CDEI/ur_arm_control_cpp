@@ -17,6 +17,7 @@ from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
 from control_msgs.msg import JointTolerance
 from copy import deepcopy
+from std_srvs.srv import Trigger
 
 class PublisherJointTrajectoryActionClient(Node):
 
@@ -27,7 +28,7 @@ class PublisherJointTrajectoryActionClient(Node):
         self.declare_parameter("joints", ["shoulder_pan_joint", "shoulder_lift_joint",
                                           "elbow_joint", "wrist_1_joint",
                                           "wrist_2_joint", "wrist_3_joint"])
-        self.declare_parameter("check_starting_point", True)
+        self.declare_parameter("check_starting_point", False)
 
         controller_name = self.get_parameter("controller_name").value
         self.joints = self.get_parameter("joints").value
@@ -50,6 +51,9 @@ class PublisherJointTrajectoryActionClient(Node):
         self.joint_state_sub = self.create_subscription(JointState, "/joint_states", self.joint_state_callback, 10)
         self.trajectory_sub = self.create_subscription(JointTrajectory, "/planned_trajectory", self.trajectory_callback, 10)
         self.status_pub = self.create_publisher(Bool, "/execution_status", 10)
+        self.emergency_sub = self.create_subscription(Bool, "/emergency_stop", self.emergency_callback, 10)
+
+        self.emergency_srv = self.create_service(Trigger, "/emergency_stop", self.handle_emergency_service)
 
         action_topic = f"{controller_name}/follow_joint_trajectory"
         self._action_client = ActionClient(self, FollowJointTrajectory, action_topic)
@@ -59,10 +63,12 @@ class PublisherJointTrajectoryActionClient(Node):
         self.planned_trajectory = None
         self.trajectory_received = False
         self.execution_complete = True
+        self.current_goal_handle = None
 
         self.get_logger().info("Waiting for action server...")
         self._action_client.wait_for_server()
-        self.timer = self.create_timer(1.0, self.timer_callback)
+        self.get_logger().info("Action server already available.")
+        self.timer = self.create_timer(0.1, self.timer_callback)
 
     def joint_state_callback(self, msg):
         self.current_joint_state = msg
@@ -87,6 +93,26 @@ class PublisherJointTrajectoryActionClient(Node):
         self.trajectory_received = True
         self.get_logger().info("Trajectory received and stored.")
 
+    def emergency_callback(self, msg):
+        if msg.data and self.current_goal_handle:
+            self.get_logger().warn("Emergency stop received! Cancelling active trajectory...")
+            cancel_future = self.current_goal_handle.cancel_goal_async()
+            cancel_future.add_done_callback(lambda f: self.get_logger().info("Goal cancel requested."))
+            self.execution_complete = True
+
+    def handle_emergency_service(self, request, response):
+        if self.current_goal_handle:
+            self.get_logger().warn("Emergency stop requested via service! Cancelling trajectory...")
+            cancel_future = self.current_goal_handle.cancel_goal_async()
+            cancel_future.add_done_callback(lambda f: self.get_logger().info("Goal cancel requested."))
+            self.execution_complete = True
+            response.success = True
+            response.message = "Trajectory cancelled successfully."
+        else:
+            response.success = False
+            response.message = "No active trajectory to cancel."
+        return response
+
     def timer_callback(self):
         status_msg = Bool()
         status_msg.data = self.execution_complete
@@ -101,17 +127,28 @@ class PublisherJointTrajectoryActionClient(Node):
         goal_msg = FollowJointTrajectory.Goal()
 
         trajectory = deepcopy(self.planned_trajectory)
-        duration_between_points = 2.0
+        duration_between_points = 0.5
 
         for i, point in enumerate(trajectory.points):
-            point.time_from_start = Duration(sec=int(duration_between_points * (i + 1)))
-            if not point.velocities or len(point.velocities) != len(point.positions):
+            total_sec = duration_between_points * (i + 1)
+            secs = int(total_sec)
+            nsecs = int((total_sec - secs) * 1e9)
+            point.time_from_start = Duration(sec=secs, nanosec=nsecs)
+            # if not point.velocities or len(point.velocities) != len(point.positions):
+            #     point.velocities = [0.0] * len(point.positions)
+            if i > 0:
+                prev = trajectory.points[i - 1]
+                dt = duration_between_points
+                point.velocities = [
+                    (p2 - p1) / dt for p1, p2 in zip(prev.positions, point.positions)
+                ]
+            else:
                 point.velocities = [0.0] * len(point.positions)
-                
+
         goal_msg.trajectory = trajectory
-        goal_msg.goal_time_tolerance = Duration(sec=1)
+        goal_msg.goal_time_tolerance = Duration(sec=0, nanosec=200_000_000)
         goal_msg.goal_tolerance = [
-            JointTolerance(position=0.01, velocity=0.01, name=self.joints[i]) for i in range(6)
+            JointTolerance(position=0.01, velocity=0.01, name=name) for name in self.joints
         ]
 
         self.get_logger().info("Sending trajectory goal with added times and velocities...")
@@ -126,6 +163,7 @@ class PublisherJointTrajectoryActionClient(Node):
             return
 
         self.get_logger().info("Goal accepted. Waiting for result...")
+        self.current_goal_handle = goal_handle
         goal_handle.get_result_async().add_done_callback(self.get_result_callback)
 
     def get_result_callback(self, future):
@@ -136,10 +174,9 @@ class PublisherJointTrajectoryActionClient(Node):
             self.get_logger().info("Trajectory execution succeeded.")
         else:
             if result.error_code != FollowJointTrajectory.Result.SUCCESSFUL:
-                self.get_logger().error(
-                    f"Done with result: {self.error_code_to_str(result.error_code)}"
-                )
-            raise RuntimeError("Executing trajectory failed. " + result.error_string)
+                self.get_logger().error(f"Done with result: {self.error_code_to_str(result.error_code)}")
+            # raise RuntimeError("Executing trajectory failed. " + result.error_string)   # To avoid node shutdown can be commented out
+            self.get_logger().error(f"Executing trajectory failed. {result.error_string}")
         self.execution_complete = True
 
     @staticmethod
