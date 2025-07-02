@@ -64,6 +64,7 @@ class PublisherJointTrajectoryActionClient(Node):
         self.trajectory_received = False
         self.execution_complete = True
         self.current_goal_handle = None
+        self.prev_status = True
 
         self.get_logger().info("Waiting for action server...")
         self._action_client.wait_for_server()
@@ -116,7 +117,9 @@ class PublisherJointTrajectoryActionClient(Node):
     def timer_callback(self):
         status_msg = Bool()
         status_msg.data = self.execution_complete
-        self.status_pub.publish(status_msg)
+        if self.prev_status != self.execution_complete:
+            self.status_pub.publish(status_msg)
+            self.prev_status = self.execution_complete
 
         if self.trajectory_received and self.starting_point_ok:
             self.send_trajectory_goal()

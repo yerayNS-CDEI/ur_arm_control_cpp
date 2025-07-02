@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import TransformStamped, Pose
 import tf2_ros
-from scipy.spatial.transform import Rotation as R  # Reemplazo moderno
+from scipy.spatial.transform import Rotation as R
 
 class EndEffectorListener(Node):
     def __init__(self):

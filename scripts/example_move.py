@@ -71,6 +71,86 @@ TRAJECTORIES = {
     ],
 }
 
+# ###############################################################
+# ### WRIST SINGULARITY
+# ###############################################################
+# TRAJECTORIES = {
+#     "traj0": [
+#         {
+#             "positions": [0.0, -1.0058, 2.0654, -3.2563, 3.1416, -0.4506],
+#             "velocities": [0.1, 0.1, 0.1, 0.1, 0.0, 0.1],
+#             "time_from_start": Duration(sec=4, nanosec=0),
+#         },
+#         {
+#             "positions": [0.0, -1.1451, 2.0961, -2.4918, 3.1416, 0.2051],
+#             "velocities": [0.1, 0.1, 0.1, 0.1, 0.0, 0.1],
+#             "time_from_start": Duration(sec=8, nanosec=0),
+#         },
+#         {
+#             "positions": [0.0, -1.2844, 2.1268, -1.7273, 3.1416, 0.8608],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=12, nanosec=0),
+#         },
+#     ],
+#     "traj1": [
+#         {
+#             "positions": [0.0, -1.2844, 2.1268, -1.7273, 3.1416, 0.8608],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=4, nanosec=0),
+#         },
+#         {
+#             "positions": [0.0, -1.1451, 2.0961, -2.4918, 3.1416, 0.2051],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=8, nanosec=0),
+#         },
+#         {
+#             "positions": [0.0, -1.0058, 2.0654, -3.2563, 3.1416, -0.4506],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=12, nanosec=0),
+#         },
+#     ],
+# }
+
+# ###############################################################
+# ### SHOULDER SINGULARITY
+# ###############################################################
+# TRAJECTORIES = {
+#     "traj0": [
+#         {
+#             "positions": [0.2726, -2.5578, 2.3515, -3.273, 4.4544, -0.089],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=4, nanosec=0),
+#         },
+#         {
+#             "positions": [0.1988, -2.5878, 2.3541, -3.24, 4.5242, -0.0642],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=8, nanosec=0),
+#         },
+#         {
+#             "positions": [0.125, -2.6178, 2.3567, -3.207, 4.594, -0.0394],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=12, nanosec=0),
+#         },
+#     ],
+#     "traj1": [
+#         {
+#             "positions": [0.125, -2.6178, 2.3567, -3.207, 4.594, -0.0394],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=4, nanosec=0),
+#         },
+#         {
+#             "positions": [0.1988, -2.5878, 2.3541, -3.24, 4.5242, -0.0642],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=8, nanosec=0),
+#         },
+#         {
+#             "positions": [0.2726, -2.5578, 2.3515, -3.273, 4.4544, -0.089],
+#             "velocities": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+#             "time_from_start": Duration(sec=12, nanosec=0),
+#         },
+#     ],
+# }
+
 class JTCClient(rclpy.node.Node):
     """Small test client for the jtc."""
 
