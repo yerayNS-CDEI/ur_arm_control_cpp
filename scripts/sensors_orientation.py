@@ -18,20 +18,20 @@ class SensorsOrientation(Node):
 
         # Node Variables
         self.end_effector_pose = None
-        self.min_distance = 0.0    # cm
-        self.max_distance = 20.0    # cm
+        self.min_distance = 0.1    # cm
+        self.max_distance = 18.0    # cm
         self.min_voltage = 0.0    # V
-        self.max_voltage = 5.0    # V
-        self.ideal_distance = 20.0  # cm
+        self.max_voltage = 4.15    # V
+        self.ideal_distance = 15.0  # cm
         self.toggle = 1
-        self.box_analog_in = []
-        self.tool_analog_in = []
+        self.box_analog_in = [0.0, 0.0]
+        self.tool_analog_in = [0.0, 0.0]
         # 3 sensors: A left, B right, C top 
         # Positions on the plate 
         # Define the positions of the sensors
-        xA, yA = -10.0, -1.0 # Position of sensor A 
-        xB, yB = 10.0, -1.0 # Position of sensor B 
-        xC, yC = 0.0, 10.0 # Position of sensor C 
+        xA, yA = -5.5, -4.75 # Position of sensor A 
+        xB, yB = 5.5, -4.75 # Position of sensor B 
+        xC, yC = 0.0, 4.75 # Position of sensor C 
         self.pA= np.array([xA, yA, 0.0])
         self.pB= np.array([xB, yB, 0.0])
         self.pC= np.array([xC, yC, 0.0])
@@ -45,7 +45,7 @@ class SensorsOrientation(Node):
         self.create_subscription(IOStates, "/io_and_status_controller/io_states", self.io_callback, 10)
         self.create_subscription(ToolDataMsg, "/io_and_status_controller/tool_data", self.tool_callback, 10)
 
-        self.timer = self.create_timer(1.0, self.timer_callback)
+        self.timer = self.create_timer(3.0, self.timer_callback)
 
     def end_effector_pose_callback(self, msg):
         self.end_effector_pose = msg
@@ -54,17 +54,20 @@ class SensorsOrientation(Node):
         self.current_joint_state = msg
 
     def io_callback(self, msg):
-        for idx, analog_in in msg.analog_in_states:
-            self.box_analog_in[idx] = analog_in
-            self.get_logger().info(f"Analog input pin {analog_in.pin}: {analog_in.state}")
+        idx = 0
+        for analog_in in msg.analog_in_states:
+            if idx < len(self.box_analog_in):
+                self.box_analog_in[idx] = analog_in.state
+            idx += 1
+            # self.get_logger().info(f"Analog input pin {analog_in.pin}: {analog_in.state}")
 
     def tool_callback(self, msg):
-        self.tool_analog_in[0] = msg.tool_input2
-        self.tool_analog_in[1] = msg.tool_input3
-        self.get_logger().info(f"Tool analog inputs: {msg.tool_input2} and {msg.tool_input3} V")
-        self.get_logger().info(f"Tool voltage: {msg.tool_output_voltage} V")
-        self.get_logger().info(f"Tool current: {msg.tool_current} A")
-        self.get_logger().info(f"Tool temperature: {msg.tool_temperature} °C")
+        self.tool_analog_in[0] = msg.analog_input2
+        self.tool_analog_in[1] = msg.analog_input3
+        # self.get_logger().info(f"Tool analog inputs: {msg.analog_input2} and {msg.analog_input3} V")
+        # self.get_logger().info(f"Tool voltage: {msg.tool_output_voltage} V")
+        # self.get_logger().info(f"Tool current: {msg.tool_current} A")
+        # self.get_logger().info(f"Tool temperature: {msg.tool_temperature} °C")
 
     def timer_callback(self):
 
@@ -72,13 +75,17 @@ class SensorsOrientation(Node):
             self.get_logger().info("No end effector pose retrieved yet")
             return
 
+        self.get_logger().info(f"Analog input pin 0: {self.box_analog_in[0]}")
+        self.get_logger().info(f"Analog input pin 1: {self.box_analog_in[1]}")
+        self.get_logger().info(f"Tool analog inputs: {self.tool_analog_in[0]} and {self.tool_analog_in[1]} V")
+
         # Distance readings from sensors
         # dA = np.random.uniform(self.min_distance, self.max_distance)
         # dB = np.random.uniform(self.min_distance, self.max_distance)
         # dC = np.random.uniform(self.min_distance, self.max_distance)
-        vA = self.box_analog_in[0]
-        vB = self.box_analog_in[1]
-        vC = self.tool_analog_in[0]
+        vA = float(self.box_analog_in[0])
+        vB = float(self.tool_analog_in[0])
+        vC = float(self.box_analog_in[1])
         dA = self.min_distance + (self.max_distance - self.min_distance)/(self.max_voltage - self.min_voltage) * (vA - self.min_voltage)
         dB = self.min_distance + (self.max_distance - self.min_distance)/(self.max_voltage - self.min_voltage) * (vB - self.min_voltage)
         dC = self.min_distance + (self.max_distance - self.min_distance)/(self.max_voltage - self.min_voltage) * (vC - self.min_voltage)        
@@ -134,7 +141,7 @@ class SensorsOrientation(Node):
 
         # Compute corrected position
         self.get_logger().warn(f"Toggle Value: {self.toggle}")
-        p_new = p_current - (self.toggle)*abs(distance - self.ideal_distance) * nw_global / 100     # in meters!!
+        p_new = p_current - 0*(self.toggle)*abs(distance - self.ideal_distance) * nw_global / 100     # in meters!!
         self.toggle *= -1
 
         # Rotation matrix and transform matrix
@@ -164,7 +171,7 @@ class SensorsOrientation(Node):
         goal_pose.time_from_start.sec = int(time_from_start)
         goal_pose.time_from_start.nanosec = int((time_from_start % 1.0) * 1e9)
         traj_msg.points.append(goal_pose)
-        # self.trajectory_pub.publish(traj_msg)
+        self.trajectory_pub.publish(traj_msg)
 
         # goal_pose = Pose()
         # goal_pose.position.x = p_new[0]
