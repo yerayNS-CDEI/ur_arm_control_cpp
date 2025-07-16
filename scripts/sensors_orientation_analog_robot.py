@@ -2,7 +2,7 @@
 import rclpy
 from rclpy.node import Node
 import numpy as np
-from std_msgs.msg import String, Float32MultiArray
+from std_msgs.msg import String
 from geometry_msgs.msg import Pose
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
@@ -18,20 +18,23 @@ class SensorsOrientation(Node):
 
         # Node Variables
         self.end_effector_pose = None
-        self.ideal_distance = 5.0  # cm
+        self.min_distance = 0.1    # cm
+        self.max_distance = 18.0    # cm
+        self.min_voltage = 0.0    # V
+        self.max_voltage = 4.15    # V
+        self.ideal_distance = 15.0  # cm
         self.toggle = 1
+        self.box_analog_in = [0.0, 0.0]
+        self.tool_analog_in = [0.0, 0.0]
         # 3 sensors: A left, B right, C top 
         # Positions on the plate 
         # Define the positions of the sensors
-        xA, yA = -15, -15 # Position of sensor A 
-        xB, yB = 15, -15 # Position of sensor B 
-        xC, yC = 0.0, 15 # Position of sensor C 
+        xA, yA = -5.5, -4.75 # Position of sensor A 
+        xB, yB = 5.5, -4.75 # Position of sensor B 
+        xC, yC = 0.0, 4.75 # Position of sensor C 
         self.pA= np.array([xA, yA, 0.0])
         self.pB= np.array([xB, yB, 0.0])
         self.pC= np.array([xC, yC, 0.0])
-        self.dA = 0
-        self.dB = 0
-        self.dC = 0
 
         self.publisher_ = self.create_publisher(String, 'topic', 10)
         # self.publisher_goal_pose = self.create_publisher(Pose, '/goal_pose', 10)
@@ -39,7 +42,8 @@ class SensorsOrientation(Node):
 
         self.subscriptor_ = self.create_subscription(Pose, '/end_effector_pose', self.end_effector_pose_callback, 10)
         self.create_subscription(JointState, "/joint_states", self.joint_state_callback, 10)
-        self.create_subscription(Float32MultiArray, "/distance_sensors", self.listener_distance_callback, 10)
+        self.create_subscription(IOStates, "/io_and_status_controller/io_states", self.io_callback, 10)
+        self.create_subscription(ToolDataMsg, "/io_and_status_controller/tool_data", self.tool_callback, 10)
 
         self.timer = self.create_timer(3.0, self.timer_callback)
 
@@ -49,22 +53,21 @@ class SensorsOrientation(Node):
     def joint_state_callback(self, msg):
         self.current_joint_state = msg
 
-    def listener_distance_callback(self, msg):
-        if len(msg.data) == 6:
-            ultra1, ultra2, ultra3 = msg.data[0:3]
-            s1, s2, s3 = msg.data[3:6]
-            self.dA = s2*100
-            self.dB = s3*100
-            self.dC = s1*100
-            # self.dB = self.dA
-            # self.dC = self.dA
+    def io_callback(self, msg):
+        idx = 0
+        for analog_in in msg.analog_in_states:
+            if idx < len(self.box_analog_in):
+                self.box_analog_in[idx] = analog_in.state
+            idx += 1
+            # self.get_logger().info(f"Analog input pin {analog_in.pin}: {analog_in.state}")
 
-            self.get_logger().info(
-                f"Ultrasónicos: [{ultra1:.2f}, {ultra2:.2f}, {ultra3:.2f}] m | "
-                f"VL6180X: [{s1:.3f}, {s2:.3f}, {s3:.3f}] m"
-            )
-        else:
-            self.get_logger().warn("Message recevied was incomplete.")
+    def tool_callback(self, msg):
+        self.tool_analog_in[0] = msg.analog_input2
+        self.tool_analog_in[1] = msg.analog_input3
+        # self.get_logger().info(f"Tool analog inputs: {msg.analog_input2} and {msg.analog_input3} V")
+        # self.get_logger().info(f"Tool voltage: {msg.tool_output_voltage} V")
+        # self.get_logger().info(f"Tool current: {msg.tool_current} A")
+        # self.get_logger().info(f"Tool temperature: {msg.tool_temperature} °C")
 
     def timer_callback(self):
 
@@ -72,14 +75,28 @@ class SensorsOrientation(Node):
             self.get_logger().info("No end effector pose retrieved yet")
             return
 
+        self.get_logger().info(f"Analog input pin 0: {self.box_analog_in[0]}")
+        self.get_logger().info(f"Analog input pin 1: {self.box_analog_in[1]}")
+        self.get_logger().info(f"Tool analog inputs: {self.tool_analog_in[0]} and {self.tool_analog_in[1]} V")
+
+        # Distance readings from sensors
+        # dA = np.random.uniform(self.min_distance, self.max_distance)
+        # dB = np.random.uniform(self.min_distance, self.max_distance)
+        # dC = np.random.uniform(self.min_distance, self.max_distance)
+        vA = float(self.box_analog_in[0])
+        vB = float(self.tool_analog_in[0])
+        vC = float(self.box_analog_in[1])
+        dA = self.min_distance + (self.max_distance - self.min_distance)/(self.max_voltage - self.min_voltage) * (vA - self.min_voltage)
+        dB = self.min_distance + (self.max_distance - self.min_distance)/(self.max_voltage - self.min_voltage) * (vB - self.min_voltage)
+        dC = self.min_distance + (self.max_distance - self.min_distance)/(self.max_voltage - self.min_voltage) * (vC - self.min_voltage)        
+
         # normal vector to plate
         nV = np.array([0.0, 0.0, 1.0])
 
         # Wall intersection points
-        wA = self.pA + self.dA * nV
-        wB = self.pB + self.dB * nV
-        wC = self.pC + self.dC * nV
-        self.get_logger().info(f"Projected points: {wA}, {wB}, {wC}")
+        wA = self.pA + dA * nV
+        wB = self.pB + dB * nV
+        wC = self.pC + dC * nV
 
         # Plane vectors
         v1= wB - wA
@@ -87,7 +104,6 @@ class SensorsOrientation(Node):
 
         #Wall normal
         nW0= np.cross(v1,v2)
-        self.get_logger().info(f"Wall normal vector: {nW0}")
         nw= nW0/np.linalg.norm(nW0)
 
         # Distance from center (0,0,0) to wall plane
@@ -118,9 +134,6 @@ class SensorsOrientation(Node):
         rot = self.end_effector_pose.orientation
         r = R.from_quat([rot.x, rot.y, rot.z, rot.w])
         nw_global = r.apply(nw)
-        q = r.apply([0, pitch, yaw])
-        q = R.from_euler('xyz', q, degrees=False)
-        q = q.as_quat()
 
         # Current end effector position
         pos = self.end_effector_pose.position

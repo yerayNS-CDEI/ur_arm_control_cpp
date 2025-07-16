@@ -20,7 +20,7 @@ class SensorsOrientation(Node):
         self.end_effector_pose = None
         self.min_distance = 19.0    # cm
         self.max_distance = 23.0    # cm
-        self.ideal_distance = 20.0  # cm
+        self.ideal_distance = 5.0  # cm
         self.toggle = 1
         # 3 sensors: A left, B right, C top 
         # Positions on the plate 
@@ -55,8 +55,10 @@ class SensorsOrientation(Node):
 
         # Distance readings from sensors
         dA = np.random.uniform(self.min_distance, self.max_distance)
-        dB = np.random.uniform(self.min_distance, self.max_distance)
-        dC = np.random.uniform(self.min_distance, self.max_distance)
+        # dB = np.random.uniform(self.min_distance, self.max_distance)
+        # dC = np.random.uniform(self.min_distance, self.max_distance)
+        dB = dA
+        dC = dA
 
         # normal vector to plate
         nV = np.array([0.0, 0.0, 1.0])
