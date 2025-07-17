@@ -212,7 +212,7 @@ def launch_setup(context, *args, **kwargs):
     )
 
     rviz_config_file = PathJoinSubstitution(
-        [FindPackageShare("ur_arm_control"),"rviz", "view_robot.rviz"]
+        [FindPackageShare("ur_arm_control_cpp"),"rviz", "view_robot.rviz"]
     )
 
     # define update rate
@@ -452,7 +452,7 @@ def generate_launch_description():
             "kinematics_params_file",
             default_value=PathJoinSubstitution(
                 [
-                    FindPackageShare("ur_arm_control"),
+                    FindPackageShare("ur_arm_control_cpp"),
                     "config",
                     "my_robot_calibration.yaml",
                 ]
@@ -637,7 +637,7 @@ def generate_launch_description():
     declared_arguments.append(
         DeclareLaunchArgument(
             "initial_position_package",
-            default_value="ur_arm_control",
+            default_value="ur_arm_control_cpp",
             description="Package in where to find the initial positions file.",
         )
     )

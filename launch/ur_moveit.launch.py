@@ -384,7 +384,7 @@ def generate_launch_description():
     declared_arguments.append(
         DeclareLaunchArgument(
             "initial_position_package",
-            default_value="ur_arm_control",
+            default_value="ur_arm_control_cpp",
             description="Package in where to find the initial positions file.",
         )
     )

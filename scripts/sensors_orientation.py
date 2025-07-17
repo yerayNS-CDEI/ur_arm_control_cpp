@@ -212,7 +212,18 @@ class SensorsOrientation(Node):
         if np.any(np.isnan(joint_values)):
             self.get_logger().error("IK solution contains NaN. Aborting.")
             return
+        if {
+            (joint_values[0] < -1.57 or joint_values[0] > 1.57) or 
+            (joint_values[1] < -1.57 or joint_values[1] > 1.57) or 
+            (joint_values[2] < -1.57 or joint_values[2] > 1.57) or 
+            (joint_values[3] < -1.57 or joint_values[3] > 1.57) or 
+            (joint_values[4] < -1.57 or joint_values[4] > 1.57) or 
+            (joint_values[5] < -1.57 or joint_values[5] > 1.57)
+            }:
+            self.get_logger().error("Selected solution with possible collision. Joint values outside of safety margins. Aborting.")
+            return
         # joint_values[5] = 0.0   # NEEDS TO BE MODIFIED IN CASE ANOTHER INITIAL SENSORS POSITION IS USED!!!
+        
         # Publish GoalPose
         traj_msg = JointTrajectory()
         traj_msg.joint_names = [

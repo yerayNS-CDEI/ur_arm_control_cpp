@@ -106,7 +106,7 @@ def generate_launch_description():
     robot_description_kinematics = get_robot_description_kinematics()
     servo_parameters = get_servo_parameters()
     demo_node = Node(
-        package="ur_arm_control",
+        package="ur_arm_control_cpp",
         executable="my_moveit_program",
         name="my_moveit_program",
         output="screen",
