@@ -18,7 +18,7 @@ class SensorsOrientation(Node):
 
         # Node Variables
         self.end_effector_pose = None
-        self.ideal_distance = 5.0  # cm
+        self.ideal_distance = 25.0  # cm
         self.toggle = 1
         # 3 sensors: A left, B right, C top 
         # Positions on the plate 
@@ -60,7 +60,7 @@ class SensorsOrientation(Node):
             # self.dC = self.dA
 
             self.get_logger().info(
-                f"Ultrasónicos: [{ultra1:.2f}, {ultra2:.2f}, {ultra3:.2f}] m | "
+                f"Ultrasound: [{ultra1:.2f}, {ultra2:.2f}, {ultra3:.2f}] m | "
                 f"VL6180X: [{s1:.3f}, {s2:.3f}, {s3:.3f}] m"
             )
         else:
@@ -96,13 +96,15 @@ class SensorsOrientation(Node):
         self.get_logger().info(f"Distance to wall from center: {distance:.2f} cm")
 
         # Pitch and yaw error angles 
-        pitch = -np.arctan2(nw[0],nw[2])
-        yaw = -np.arctan2(nw[1],nw[2])
+        yaw = np.arctan2(nw[0],nw[2])
+        pitch = np.arctan2(nw[1],nw[2])
         yaw_deg = np.rad2deg(yaw)
         pitch_deg = np.rad2deg(pitch)
 
         self.get_logger().info(f"Pitch: {pitch_deg:.2f} degrees")
         self.get_logger().info(f"Yaw: {yaw_deg:.2f} degrees")
+
+        ### ORIGINAL
 
         # rot = self.end_effector_pose.orientation
         # euler = R.from_quat([rot.x, rot.y, rot.z, rot.w]).as_euler('xyz')
@@ -112,17 +114,83 @@ class SensorsOrientation(Node):
         # goal_orn = R.from_euler('xyz', goal_orn, degrees=False)
         # q = goal_orn.as_quat()
 
-        # Convert orientation quaternion to rotation matrix
+        # # Convert orientation quaternion to rotation matrix
+        # rot = self.end_effector_pose.orientation
+        # curr_orn_rot = R.from_quat([rot.x, rot.y, rot.z, rot.w])
+        # curr_orn = R.from_quat([rot.x, rot.y, rot.z, rot.w]).as_euler('ZYX')    # ZYX: Roll-Pitch-Yaw intrinsic rotation
+        # self.get_logger().info(f"Current Orientation (rpy): roll={curr_orn[0]:.2f}, pitch={curr_orn[1]:.2f}, yaw={curr_orn[2]:.2f}")
+        # q = curr_orn_rot.apply([0, pitch, yaw])
+        # goal_orn = [curr_orn[0] + q[0], curr_orn[1] + q[1], curr_orn[2] + q[2]]
+        # self.get_logger().info(f"Demanded Orientation (rpy): roll={goal_orn[0]:.2f}, pitch={goal_orn[1]:.2f}, yaw={goal_orn[2]:.2f}")
+        # goal_orn = R.from_euler('ZYX', goal_orn, degrees=False)
+        # self.get_logger().info(f"Goal orientation matrix: {goal_orn.as_matrix()}")
+        # q = goal_orn.as_quat()
+
+        ### OPTION 1
+
+        # Current rotation of the EE w.r.t. base frame
         rot = self.end_effector_pose.orientation
         curr_orn_rot = R.from_quat([rot.x, rot.y, rot.z, rot.w])
-        curr_orn = R.from_quat([rot.x, rot.y, rot.z, rot.w]).as_euler('xyz')
-        self.get_logger().info(f"Current Orientation (rpy): roll={curr_orn[0]:.2f}, pitch={curr_orn[1]:.2f}, yaw={curr_orn[2]:.2f}")
-        q = curr_orn_rot.apply([0, pitch, yaw])
-        goal_orn = [curr_orn[0] + q[0], curr_orn[1] + q[1], curr_orn[2] + q[2]]
-        self.get_logger().info(f"Demanded Orientation (rpy): roll={goal_orn[0]:.2f}, pitch={goal_orn[1]:.2f}, yaw={goal_orn[2]:.2f}")
-        goal_orn = R.from_euler('xyz', goal_orn, degrees=False)
-        self.get_logger().info(f"Goal orientation matrix: {goal_orn.as_matrix()}")
-        q = goal_orn.as_quat()
+        curr_orn = R.from_quat([rot.x, rot.y, rot.z, rot.w]).as_euler('ZYX', degrees=True)
+        self.get_logger().info(f"Current Orientation (rpy w.r.t. base frame): Roll={curr_orn[0]:.2f}, Pitch={curr_orn[1]:.2f}, Yaw={curr_orn[2]:.2f}")
+
+        # 2. Incremental rotation in EE frame Rotación (order ZYX = Intrinsic roll-pitch-yaw)
+        increment_rot_ee = R.from_euler('ZYX', [0, yaw, pitch], degrees=False)
+
+        # 3. Rotation Composition: R_goal = R_base * R_increment(EE_frame)
+        goal_rot = curr_orn_rot * increment_rot_ee
+        goal_rot_euler = goal_rot.as_euler('ZYX', degrees=True)
+        self.get_logger().info(f"Demanded Orientation (rpy w.r.t. base frame): Roll={goal_rot_euler[0]:.2f}, Pitch={goal_rot_euler[1]:.2f}, Yaw={goal_rot_euler[2]:.2f}")
+
+        ## Roll Compensation
+        # Paso 1: obtener el eje Z del EE en el mundo
+        z_ee = goal_rot.apply([0, 0, 1])  # New Z_EE in base frame
+        # Paso 2: Obtaining ideal Y axis (-Z on base frame)
+        y_desired = np.array([0.0, 0.0, -1.0])  # vertical vector in the sensors setup
+        # Paso 3: Project y_desired on the sensors plane
+        y_proj = y_desired - np.dot(y_desired, z_ee) * z_ee
+        norm = np.linalg.norm(y_proj)
+        if norm < 1e-6:
+            self.get_logger().warn("y_proj is nearly zero: y_desired is aligned with Z_EE.")
+        else:
+            y_proj /= norm
+            y_proj /= np.linalg.norm(y_proj)
+            # Paso 4: Reconstruct ortonormal base (X = Y × Z)
+            x_ee = np.cross(y_proj, z_ee)
+            x_ee /= np.linalg.norm(x_ee)
+            y_ee = np.cross(z_ee, x_ee)
+            # Paso 5: New rotation with fixed Z_EE and corrected Y_EE
+            R_corrected = np.column_stack((x_ee, y_ee, z_ee))
+            goal_rot = R.from_matrix(R_corrected)
+
+        # 4. Final quaternion
+        q = goal_rot.as_quat()
+        final_euler = goal_rot.as_euler('ZYX', degrees=True)
+        self.get_logger().info(f"Final Corrected Orientation (rpy w.r.t. base frame): Roll={final_euler[0]:.2f}, Pitch={final_euler[1]:.2f}, Yaw={final_euler[2]:.2f}")
+
+        ### OPTION 2
+
+        # # 1. Rotación actual del EE en el marco base
+        # rot = self.end_effector_pose.orientation
+        # R_curr = R.from_quat([rot.x, rot.y, rot.z, rot.w])
+
+        # # 2. Ejes locales del EE expresados en el marco base
+        # # Estos serán los ejes alrededor de los cuales quieres rotar en el mundo
+        # y_axis_base = R_curr.apply([0, 1, 0])  # Eje Y del EE en el marco base
+        # z_axis_base = R_curr.apply([0, 0, 1])  # Eje Z del EE en el marco base
+
+        # # 3. Rotaciones sobre esos ejes (en el marco base)
+        # R_pitch = R.from_rotvec(pitch * y_axis_base)
+        # R_yaw   = R.from_rotvec(yaw * z_axis_base)
+
+        # # 4. Composición en marco base: primero pitch, luego yaw
+        # # R_goal = R_yaw * R_pitch * R_curr
+        # R_goal = R_curr * R_pitch * R_yaw
+
+        # # 5. Obtener el nuevo quaternion
+        # q = R_goal.as_quat()
+
+        ###
 
         # Current end effector position
         pos = self.end_effector_pose.position
@@ -131,7 +199,7 @@ class SensorsOrientation(Node):
         # Compute corrected position
         nw_global = curr_orn_rot.apply(nw)
         self.get_logger().warn(f"Toggle Value: {self.toggle}")
-        p_new = p_current - 0*(self.toggle)*abs(distance - self.ideal_distance) * nw_global / 100     # in meters!!
+        p_new = p_current - (self.toggle)*abs(distance - self.ideal_distance) * nw_global / 100     # in meters!!
         self.toggle *= -1
 
         # Rotation matrix and transform matrix
@@ -144,7 +212,7 @@ class SensorsOrientation(Node):
         if np.any(np.isnan(joint_values)):
             self.get_logger().error("IK solution contains NaN. Aborting.")
             return
-        joint_values[5] = 0.0   # NEEDS TO BE MODIFIED IN CASE ANOTHER INITIAL SENSORS POSITION IS USED!!!
+        # joint_values[5] = 0.0   # NEEDS TO BE MODIFIED IN CASE ANOTHER INITIAL SENSORS POSITION IS USED!!!
         # Publish GoalPose
         traj_msg = JointTrajectory()
         traj_msg.joint_names = [
