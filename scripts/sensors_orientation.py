@@ -161,11 +161,12 @@ class SensorsOrientation(Node):
                 y_ee = np.cross(z_ee, x_ee)
                 # Paso 5: New rotation with fixed Z_EE and corrected Y_EE
                 R_corrected = np.column_stack((x_ee, y_ee, z_ee))
-                R_correct = R.from_matrix(R_corrected)
+                goal_rot = R.from_matrix(R_corrected)
 
-            roll_comp = R.from_euler('ZYX', [-45, 0, 0], degrees=True)
-            goal_rot = R_correct * roll_comp
-            
+            # roll_comp = R.from_euler('ZYX', [0, 0, 0], degrees=True)
+
+            # goal_rot = R_correct * roll_comp
+
             # ## Roll Compensation 2
             # # Dirección del eje vertical de la plancha en el frame base (montado a 45° entre X_EE e Y_EE)
             # v_plancha_local = np.array([-1, 1, 0]) / np.sqrt(2)
@@ -269,6 +270,7 @@ class SensorsOrientation(Node):
             time_from_start = 0.5
             goal_pose = JointTrajectoryPoint()
             goal_pose.positions = joint_values.tolist()
+            goal_pose.positions[5] += -0.7854
             goal_pose.time_from_start.sec = int(time_from_start)
             goal_pose.time_from_start.nanosec = int((time_from_start % 1.0) * 1e9)
             traj_msg.points.append(goal_pose)

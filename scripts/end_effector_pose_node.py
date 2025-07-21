@@ -35,7 +35,7 @@ class EndEffectorListener(Node):
             original_rot = R.from_quat([rot.x, rot.y, rot.z, rot.w])
 
             # Define additional rotation of 45 degrees (pi/4 rad) around Z
-            rotation_z = R.from_euler('z', 90, degrees=True)
+            rotation_z = R.from_euler('z', 0, degrees=True)
 
             # Compose both rotations
             new_rot = original_rot * rotation_z
