@@ -19,7 +19,7 @@ class EndEffectorListener(Node):
     def timer_callback(self):
         try:
             trans: TransformStamped = self.tf_buffer.lookup_transform(
-                'base', 'tool0', rclpy.time.Time())
+                'base', 'tool0_controller', rclpy.time.Time())
             
             pos = trans.transform.translation
             rot = trans.transform.rotation
@@ -31,11 +31,27 @@ class EndEffectorListener(Node):
             euler = R.from_quat([rot.x, rot.y, rot.z, rot.w]).as_euler('xyz')
             self.get_logger().info(f"Orientation (rpy): roll={euler[0]:.2f}, pitch={euler[1]:.2f}, yaw={euler[2]:.2f}")
 
+            # Convert original orientation to rotation matrix
+            original_rot = R.from_quat([rot.x, rot.y, rot.z, rot.w])
+
+            # Define additional rotation of 45 degrees (pi/4 rad) around Z
+            rotation_z = R.from_euler('z', 90, degrees=True)
+
+            # Compose both rotations
+            new_rot = original_rot * rotation_z
+
+            # Convert back to quaternion
+            new_quat = new_rot.as_quat()  # Returns [x, y, z, w]
+
             pose_msg = Pose()
             pose_msg.position.x = pos.x
             pose_msg.position.y = pos.y
             pose_msg.position.z = pos.z
-            pose_msg.orientation = rot
+            pose_msg.orientation.x = new_quat[0]
+            pose_msg.orientation.y = new_quat[1]
+            pose_msg.orientation.z = new_quat[2]
+            pose_msg.orientation.w = new_quat[3]
+
 
             self.publisher_.publish(pose_msg)
 

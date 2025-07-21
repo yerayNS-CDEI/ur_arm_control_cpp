@@ -58,8 +58,8 @@ class SensorsOrientation(Node):
             # self.dA = s2*100
             # self.dB = s3*100
             # self.dC = s1*100
-            self.dA = ultra3*100
-            self.dB = ultra1*100
+            self.dA = ultra1*100
+            self.dB = ultra3*100
             self.dC = ultra2*100
             # self.dB = self.dA
             # self.dC = self.dA
@@ -78,7 +78,6 @@ class SensorsOrientation(Node):
             wC = self.pC + self.dC * nV
             self.get_logger().info(f"Projected points: {wA}, {wB}, {wC}")
 
-
             # Plane vectors
             v1= wB - wA
             v2= wC - wA
@@ -96,8 +95,8 @@ class SensorsOrientation(Node):
             self.get_logger().info(f"Distance to wall from center: {distance:.2f} cm")
 
             # Pitch and yaw error angles 
-            yaw = -np.arctan2(nw[1],nw[2])
-            pitch = np.arctan2(nw[0],nw[2])
+            yaw = np.arctan2(nw[0],nw[2])
+            pitch = np.arctan2(nw[1],nw[2])
             yaw_deg = np.rad2deg(yaw)
             pitch_deg = np.rad2deg(pitch)
 
@@ -135,40 +134,37 @@ class SensorsOrientation(Node):
             self.get_logger().info(f"Current Orientation (rpy w.r.t. base frame): Roll={curr_orn[0]:.2f}, Pitch={curr_orn[1]:.2f}, Yaw={curr_orn[2]:.2f}")
 
             # 2. Incremental rotation in EE frame Rotación (order ZYX = Intrinsic roll-pitch-yaw)
-            increment_rot_ee = R.from_euler('ZYX', [0, pitch, yaw], degrees=False)
+            increment_rot_ee = R.from_euler('ZYX', [0, yaw, pitch], degrees=False)
 
             # 3. Rotation Composition: R_goal = R_base * R_increment(EE_frame)
             goal_rot = curr_orn_rot * increment_rot_ee
             # goal_rot_euler = goal_rot.as_euler('ZYX', degrees=True)
             # self.get_logger().info(f"Demanded Orientation (rpy w.r.t. base frame): Roll={goal_rot_euler[0]:.2f}, Pitch={goal_rot_euler[1]:.2f}, Yaw={goal_rot_euler[2]:.2f}")
 
-            ## Roll Compensation
-            # Paso 1: Obtaining Z_EE in base frame
-            z_ee = goal_rot.apply([0, 0, 1])
-            # Paso 2: Obtaining ideal Y axis (-Z on base frame)
-            y_desired = np.array([0.0, 0.0, 1.0])  # vertical vector in the sensors setup
-            # Paso 3: Project y_desired on the sensors plane
-            y_proj = y_desired - np.dot(y_desired, z_ee) * z_ee
-            norm = np.linalg.norm(y_proj)
-            if norm < 1e-6:
-                self.get_logger().warn("y_proj is nearly zero: y_desired is aligned with Z_EE.")
-            else:
-                y_proj /= norm
-                y_proj /= np.linalg.norm(y_proj)
-                # Paso 4: Reconstruct ortonormal base (X = Y × Z)
-                x_ee = np.cross(y_proj, z_ee)
-                x_ee /= np.linalg.norm(x_ee)
-                y_ee = np.cross(z_ee, x_ee)
-                # Paso 5: New rotation with fixed Z_EE and corrected Y_EE
-                R_corrected = np.column_stack((x_ee, y_ee, z_ee))
-                R_correct = R.from_matrix(R_corrected)
+            # # ## Roll Compensation
+            # # # Paso 1: Obtaining Z_EE in base frame
+            # # z_ee = goal_rot.apply([0, 0, 1])
+            # # # Paso 2: Obtaining ideal Y axis (-Z on base frame)
+            # # y_desired = np.array([0.0, 0.0, -1.0])  # vertical vector in the sensors setup
+            # # # Paso 3: Project y_desired on the sensors plane
+            # # y_proj = y_desired - np.dot(y_desired, z_ee) * z_ee
+            # # norm = np.linalg.norm(y_proj)
+            # # if norm < 1e-6:
+            # #     self.get_logger().warn("y_proj is nearly zero: y_desired is aligned with Z_EE.")
+            # # else:
+            # #     y_proj /= norm
+            # #     y_proj /= np.linalg.norm(y_proj)
+            # #     # Paso 4: Reconstruct ortonormal base (X = Y × Z)
+            # #     x_ee = np.cross(y_proj, z_ee)
+            # #     x_ee /= np.linalg.norm(x_ee)
+            # #     y_ee = np.cross(z_ee, x_ee)
+            # #     # Paso 5: New rotation with fixed Z_EE and corrected Y_EE
+            # #     R_corrected = np.column_stack((x_ee, y_ee, z_ee))
+            # #     goal_rot = R.from_matrix(R_corrected)
 
-            roll_comp = R.from_euler('ZYX', [-45, 0, 0], degrees=True)
-            goal_rot = R_correct * roll_comp
-            
             # ## Roll Compensation 2
             # # Dirección del eje vertical de la plancha en el frame base (montado a 45° entre X_EE e Y_EE)
-            # v_plancha_local = np.array([-1, 1, 0]) / np.sqrt(2)
+            # v_plancha_local = np.array([1, 1, 0]) / np.sqrt(2)
             # v_plancha_base = curr_orn_rot.apply(v_plancha_local)
             # z_ee = goal_rot.apply([0, 0, 1])
 
@@ -197,6 +193,7 @@ class SensorsOrientation(Node):
 
             # 4. Final quaternion
             q = goal_rot.as_quat()
+            q = curr_orn_rot.as_quat()
             final_euler = goal_rot.as_euler('ZYX', degrees=True)
             self.get_logger().info(f"Final Corrected Orientation (rpy w.r.t. base frame): Roll={final_euler[0]:.2f}, Pitch={final_euler[1]:.2f}, Yaw={final_euler[2]:.2f}")
 
@@ -231,7 +228,7 @@ class SensorsOrientation(Node):
             # Compute corrected position
             nw_global = curr_orn_rot.apply(nw)
             self.get_logger().warn(f"Toggle Value: {self.toggle}")
-            p_new = p_current + 0*(self.toggle)*(distance - self.ideal_distance) * nw_global / 100     # in meters!!
+            p_new = p_current + (self.toggle)*(distance - self.ideal_distance) * nw_global / 100     # in meters!!
             # self.toggle *= -1
 
             # Rotation matrix and transform matrix

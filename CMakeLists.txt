@@ -113,6 +113,8 @@ install(PROGRAMS
   scripts/sensors_orientation.py
   scripts/sensors_orientation_sim.py
   scripts/sensors_orientation_arduino.py
+  scripts/sensors_both.py
+  scripts/sensors_distance.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
